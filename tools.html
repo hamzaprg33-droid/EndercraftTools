@@ -469,7 +469,8 @@ function getCatLabel(cat) { return (currentLang==='en'?catLabelsEn:catLabels)[ca
 async function loadTools() {
   try {
     const res = await fetch('tools.json?v=' + Date.now());
-    allTools = await res.json();
+    const raw = await res.json();
+    allTools = raw.filter(t => t.listed !== false);
     renderTools(allTools);
   } catch(e) {
     document.getElementById('tools-grid').innerHTML = '<p style="color:var(--muted);grid-column:1/-1">Fehler beim Laden der Tools.</p>';
@@ -617,11 +618,10 @@ function openDownload(id) {
   const actions = [];
   if(tool.use_custom_download && tool.custom_download_url) {
     actions.push(`<a class="btn-download" href="${tool.custom_download_url}" target="_blank">⬇ ${t('download')}</a>`);
-  } else if(!tool.use_custom_download) {
-    // Download from our site — requires login
+  } else if(!tool.use_custom_download && tool.download_file) {
     const user = localStorage.getItem('discord_user');
     if(user) {
-      actions.push(`<a class="btn-download" href="${tool.download_url||'#'}" target="_blank">⬇ ${t('download')}</a>`);
+      actions.push(`<button class="btn-download" onclick="startDownload('${tool.id}')">⬇ ${t('download')}</button>`);
     } else {
       actions.push(`<button class="btn-download" onclick="closeModal('download-modal');openLoginModal()">⬇ ${t('download')} (Login nötig)</button>`);
     }
@@ -635,6 +635,53 @@ function openDownload(id) {
 
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
 function handleOverlayClick(e, id) { if(e.target===document.getElementById(id)) closeModal(id); }
+
+// ══ DOWNLOAD PROGRESS ══
+function startDownload(id) {
+  const tool = allTools.find(t=>t.id===id);
+  if(!tool || !tool.download_file) return;
+  closeModal('download-modal');
+
+  // Show progress modal
+  document.getElementById('dl-tool-name').textContent = tool.name;
+  document.getElementById('dl-file-name').textContent = tool.download_file;
+  const ext = tool.download_file.split('.').pop().toUpperCase();
+  document.getElementById('dl-file-ext').textContent = ext;
+  document.getElementById('dl-progress-bar').style.width = '0%';
+  document.getElementById('dl-percent').textContent = '0%';
+  document.getElementById('dl-status').textContent = currentLang==='en' ? 'Preparing download...' : 'Download wird vorbereitet...';
+  document.getElementById('dl-done-btn').style.display = 'none';
+  document.getElementById('dl-progress-modal').classList.add('open');
+
+  // Animate progress bar, then trigger real download
+  let pct = 0;
+  const statuses_de = ['Verbindung wird aufgebaut...','Datei wird geprüft...','Download läuft...','Wird abgeschlossen...'];
+  const statuses_en = ['Connecting...','Verifying file...','Downloading...','Finishing up...'];
+  const statuses = currentLang==='en' ? statuses_en : statuses_de;
+  let si = 0;
+  const interval = setInterval(() => {
+    pct += Math.random() * 18 + 6;
+    if(pct > 100) pct = 100;
+    document.getElementById('dl-progress-bar').style.width = pct + '%';
+    document.getElementById('dl-percent').textContent = Math.round(pct) + '%';
+    if(si < statuses.length - 1 && pct > (si+1)*25) {
+      si++;
+      document.getElementById('dl-status').textContent = statuses[si];
+    }
+    if(pct >= 100) {
+      clearInterval(interval);
+      document.getElementById('dl-status').textContent = currentLang==='en' ? '✓ Download complete!' : '✓ Download abgeschlossen!';
+      document.getElementById('dl-done-btn').style.display = 'flex';
+      // Trigger actual file download
+      const a = document.createElement('a');
+      a.href = './downloads/' + tool.download_file;
+      a.download = tool.download_file;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+  }, 320);
+}
 
 // ══ AUTH ══
 function getDiscordOAuthURL() {
@@ -685,5 +732,45 @@ document.addEventListener('DOMContentLoaded',()=>{
   loadTools();
 });
 </script>
+<!-- DOWNLOAD PROGRESS MODAL -->
+<div class="modal-overlay" id="dl-progress-modal" style="z-index:600;">
+  <div class="modal" style="max-width:420px;text-align:center;">
+    <div style="font-size:48px;margin-bottom:16px;" id="dl-file-ext-icon">📦</div>
+    <h2 style="font-size:20px;font-weight:800;margin-bottom:4px;" id="dl-tool-name">Tool</h2>
+    <p style="font-family:var(--mono);font-size:12px;color:var(--muted);margin-bottom:28px;" id="dl-file-name">file.zip</p>
+
+    <!-- Progress bar -->
+    <div style="background:rgba(47,128,255,0.1);border:1px solid var(--border);border-radius:99px;height:10px;overflow:hidden;margin-bottom:10px;">
+      <div id="dl-progress-bar" style="height:100%;width:0%;background:linear-gradient(90deg,var(--blue),var(--cyan));border-radius:99px;transition:width .3s ease;"></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+      <span style="font-size:13px;color:var(--muted);" id="dl-status">Vorbereitung...</span>
+      <span style="font-family:var(--mono);font-size:13px;color:var(--cyan);font-weight:700;" id="dl-percent">0%</span>
+    </div>
+
+    <!-- File info box -->
+    <div style="background:rgba(47,128,255,0.06);border:1px solid var(--border);border-radius:8px;padding:12px 16px;display:flex;align-items:center;gap:12px;margin-bottom:20px;text-align:left;">
+      <div style="width:36px;height:36px;background:rgba(47,128,255,0.12);border:1px solid var(--border);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;">📁</div>
+      <div>
+        <div style="font-size:13px;font-weight:600;color:var(--text);" id="dl-file-name2"></div>
+        <div style="font-family:var(--mono);font-size:11px;color:var(--muted);" id="dl-file-ext">ZIP</div>
+      </div>
+    </div>
+
+    <button id="dl-done-btn" class="btn-download" style="display:none;width:100%;justify-content:center;" onclick="closeModal('dl-progress-modal')">
+      ✓ <span>Schließen</span>
+    </button>
+    <button class="modal-cancel" onclick="closeModal('dl-progress-modal')" style="margin-top:12px;">Abbrechen</button>
+  </div>
+</div>
+
+<script>
+  // sync file name into second label
+  const obs = new MutationObserver(()=>{
+    document.getElementById('dl-file-name2').textContent = document.getElementById('dl-file-name').textContent;
+  });
+  obs.observe(document.getElementById('dl-file-name'), {childList:true,characterData:true,subtree:true});
+</script>
+
 </body>
 </html>
